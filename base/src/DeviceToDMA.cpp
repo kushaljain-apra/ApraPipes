@@ -20,15 +20,6 @@ bool DeviceToDMA::validateInputPins()
 		return false;
 	}
 
-	framemetadata_sp metadata = getFirstInputMetadata();
-
-	FrameMetadata::MemType memType = metadata->getMemType();
-	if (memType != FrameMetadata::MemType::CUDA_DEVICE)
-	{
-		LOG_ERROR << "<" << getId() << ">::validateInputPins input memType is expected to be CUDA_DEVICE. Actual<" << memType << ">";
-		return false;
-	}
-
 	return true;
 }
 
@@ -52,14 +43,6 @@ bool DeviceToDMA::validateOutputPins()
 
 	return true;
 }
-
-// void DeviceToDMA::addInputPin(framemetadata_sp& metadata, string& pinId)
-// {
-// 	Module::addInputPin(metadata, pinId);
-// 	auto inputRawMetadata = FrameMetadataFactory::downcast<RawImageMetadata>(metadata);
-// 	mOutputMetadata = framemetadata_sp(new RawImageMetadata(FrameMetadata::MemType::DMABUF));
-// 	mOutputPinId = addOutputPin(mOutputMetadata);
-// }
 
 void DeviceToDMA::addInputPin(framemetadata_sp &metadata, string &pinId)
 {
@@ -87,9 +70,26 @@ bool DeviceToDMA::term()
 bool DeviceToDMA::process(frame_container &frames)
 {
 	auto frame = frames.cbegin()->second;
-	auto outFrame = makeFrame(mFrameLength);
-	auto outBuffer = static_cast<DMAFDWrapper *>(outFrame->data())->getCudaPtr();
-	// memcpy(outBuffer, frame->data(), frame->size());
+	LOG_ERROR << "Printing Data Size"
+	auto outFrame = makeFrame(mOutputMetadata->getDataSize());
+	uint8_t * outBuffer = static_cast<uint8_t *>(static_cast<DMAFDWrapper *>(outFrame->data())->getCudaPtr());
+			
+	for (auto i = 0; i < mChannels; i++)
+	{
+		auto src = static_cast<uint8_t *>(frame->data()) + mSrcNextPtrOffset[i];
+		auto dst = outBuffer + mDstNextPtrOffset[i];
+
+		LOG_ERROR << "Printing Src Offset" << mSrcNextPtrOffset[i] << "Printing Destination Ptr Offset" << mDstNextPtrOffset[i];
+		LOG_ERROR << "Dst Pitch is " << mDstPitch[i] << "Src Pitch is " << mSrcPitch[i] << "Row Size " << mRowSize[i] << "MHeight "<< mHeight[i];
+	
+		auto cudaStatus = cudaMemcpy2DAsync(dst, mDstPitch[i], src, mSrcPitch[i], mRowSize[i], mHeight[i], cudaMemcpyHostToDevice, props.stream);
+		if (cudaStatus != cudaSuccess)
+		{
+			LOG_ERROR << "Cuda Operation Failed";
+			break;
+		}
+	}
+
 	frames.insert(make_pair(mOutputPinId, outFrame));
 	send(frames);
 	return true;
@@ -106,18 +106,35 @@ void DeviceToDMA::setMetadata(framemetadata_sp &metadata)
 {
 	mInputFrameType = metadata->getFrameType();
 
-	auto rawPlanarMetadata = FrameMetadataFactory::downcast<RawImagePlanarMetadata>(metadata);
-	auto width = rawPlanarMetadata->getWidth(0);
-	auto height = rawPlanarMetadata->getHeight(0);
+	auto rawImagePlanarMetadata = FrameMetadataFactory::downcast<RawImagePlanarMetadata>(metadata);	
+	auto width = rawImagePlanarMetadata->getWidth(0);
+	auto height = rawImagePlanarMetadata->getHeight(0);
 	// auto type = rawPlanarMetadata->getType();
-	auto depth = rawPlanarMetadata->getDepth();
-	auto inputImageType = rawPlanarMetadata->getImageType();
+	auto depth = rawImagePlanarMetadata->getDepth();
+	auto inputImageType = rawImagePlanarMetadata->getImageType();
+	LOG_ERROR << width;
+	LOG_ERROR << height;
 
 	auto rawOutMetadata = FrameMetadataFactory::downcast<RawImagePlanarMetadata>(mOutputMetadata);
-	RawImagePlanarMetadata outputMetadata(width, height, inputImageType, size_t(0), depth,  FrameMetadata::MemType::DMABUF);
+	RawImagePlanarMetadata outputMetadata(width, height, inputImageType, 512, depth, FrameMetadata::MemType::DMABUF);
 	rawOutMetadata->setData(outputMetadata);
 
 	mFrameLength = mOutputMetadata->getDataSize();
+
+	mChannels = rawImagePlanarMetadata->getChannels();
+	for (auto i = 0; i < mChannels; i++)
+	{
+		mSrcPitch[i] = rawImagePlanarMetadata->getStep(i);
+		mSrcNextPtrOffset[i] = rawImagePlanarMetadata->getNextPtrOffset(i);
+		mRowSize[i] = rawImagePlanarMetadata->getRowSize(i);
+		mHeight[i] = rawImagePlanarMetadata->getHeight(i);
+	}
+
+	for (auto i = 0; i < mChannels; i++)
+	{
+		mDstPitch[i] = rawOutMetadata->getStep(i);
+		mDstNextPtrOffset[i] = rawOutMetadata->getNextPtrOffset(i);
+	}
 }
 
 bool DeviceToDMA::shouldTriggerSOS()
