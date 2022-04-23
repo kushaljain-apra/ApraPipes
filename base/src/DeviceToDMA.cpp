@@ -70,11 +70,11 @@ bool DeviceToDMA::term()
 bool DeviceToDMA::process(frame_container &frames)
 {
 	auto frame = frames.cbegin()->second;
-	LOG_ERROR << "Printing Data Size"
+	LOG_ERROR << "<===================Printing Data Size=========================================>" << mOutputMetadata->getDataSize();
 	auto outFrame = makeFrame(mOutputMetadata->getDataSize());
 	uint8_t * outBuffer = static_cast<uint8_t *>(static_cast<DMAFDWrapper *>(outFrame->data())->getCudaPtr());
 			
-	for (auto i = 0; i < mChannels; i++)
+	for (auto i = 0; i < mChannels; i++) //mChannels
 	{
 		auto src = static_cast<uint8_t *>(frame->data()) + mSrcNextPtrOffset[i];
 		auto dst = outBuffer + mDstNextPtrOffset[i];
@@ -82,6 +82,7 @@ bool DeviceToDMA::process(frame_container &frames)
 		LOG_ERROR << "Printing Src Offset" << mSrcNextPtrOffset[i] << "Printing Destination Ptr Offset" << mDstNextPtrOffset[i];
 		LOG_ERROR << "Dst Pitch is " << mDstPitch[i] << "Src Pitch is " << mSrcPitch[i] << "Row Size " << mRowSize[i] << "MHeight "<< mHeight[i];
 	
+		// auto cudaStatus = cudaMemcpy2DAsync(dst, mDstPitch[i], src, mSrcPitch[i], mRowSize[i], mHeight[i], cudaMemcpyHostToDevice, props.stream);
 		auto cudaStatus = cudaMemcpy2DAsync(dst, mDstPitch[i], src, mSrcPitch[i], mRowSize[i], mHeight[i], cudaMemcpyHostToDevice, props.stream);
 		if (cudaStatus != cudaSuccess)
 		{
@@ -116,7 +117,8 @@ void DeviceToDMA::setMetadata(framemetadata_sp &metadata)
 	LOG_ERROR << height;
 
 	auto rawOutMetadata = FrameMetadataFactory::downcast<RawImagePlanarMetadata>(mOutputMetadata);
-	RawImagePlanarMetadata outputMetadata(width, height, inputImageType, 512, depth, FrameMetadata::MemType::DMABUF);
+	// RawImagePlanarMetadata outputMetadata(width, height, inputImageType, 512, depth, FrameMetadata::MemType::DMABUF);
+	RawImagePlanarMetadata outputMetadata(width, height, ImageMetadata::ImageType::YUV420, 256, depth, FrameMetadata::MemType::DMABUF);
 	rawOutMetadata->setData(outputMetadata);
 
 	mFrameLength = mOutputMetadata->getDataSize();
