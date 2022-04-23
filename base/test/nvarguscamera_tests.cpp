@@ -276,4 +276,93 @@ BOOST_AUTO_TEST_CASE(encoderrtsppush, *boost::unit_test::disabled())
 	p.wait_for_all();
 }
 
+BOOST_AUTO_TEST_CASE(v4l2camRender, *boost::unit_test::disabled())
+{
+	V4L2CameraSourceProps sourceProps(800, 800, "/dev/video0");
+	sourceProps.maxConcurrentFrames = 10;
+	sourceProps.fps = 60;
+	auto source = boost::shared_ptr<Module>(new V4L2CameraSource(sourceProps));
+
+	BayerToRGBAProps brgbprops;
+	brgbprops.qlen = 1;
+	auto bayerTRGBA = boost::shared_ptr<Module>(new BayerToRGBA(brgbprops));
+	source->setNext(bayerTRGBA);
+
+	auto stream = cudastream_sp(new ApraCudaStream);
+
+	DeviceToDMAProps deviceTodmaprops(stream);
+	deviceTodmaprops.qlen = 1;
+	deviceTodmaprops.logHealth = true;
+	deviceTodmaprops.logHealthFrequency = 100;
+
+	auto devicedma = boost::shared_ptr<Module>(new DeviceToDMA(deviceTodmaprops));
+	bayerTRGBA->setNext(devicedma);
+
+	auto sink = boost::shared_ptr<Module>(new EglRenderer(EglRendererProps(0, 0, 800, 800)));
+	devicedma->setNext(sink);
+
+	PipeLine p("test");
+	p.appendModule(source);
+	BOOST_TEST(p.init());
+
+	Logger::setLogLevel(boost::log::trivial::severity_level::info);
+
+	p.run_all_threaded();
+
+	boost::this_thread::sleep_for(boost::chrono::seconds(1000));
+	Logger::setLogLevel(boost::log::trivial::severity_level::error);
+
+	p.stop();
+	p.term();
+
+	p.wait_for_all();
+}
+
+BOOST_AUTO_TEST_CASE(camerawrite, *boost::unit_test::disabled())
+{
+	V4L2CameraSourceProps sourceProps(800, 800, "/dev/video0");
+	sourceProps.maxConcurrentFrames = 10;
+	sourceProps.fps = 60;
+	auto source = boost::shared_ptr<Module>(new V4L2CameraSource(sourceProps));
+
+	BayerToRGBAProps brgbprops;
+	brgbprops.qlen = 1;
+	auto bayerTRGBA = boost::shared_ptr<Module>(new BayerToRGBA(brgbprops));
+	source->setNext(bayerTRGBA);
+
+	auto stream = cudastream_sp(new ApraCudaStream);
+
+	DeviceToDMAProps deviceTodmaprops(stream);
+	deviceTodmaprops.qlen = 1;
+	deviceTodmaprops.logHealth = true;
+	deviceTodmaprops.logHealthFrequency = 100;
+
+	auto devicedma = boost::shared_ptr<Module>(new DeviceToDMA(deviceTodmaprops));
+	bayerTRGBA->setNext(devicedma);
+
+	auto copy = boost::shared_ptr<Module>(new DMAFDToHostCopy);
+	devicedma->setNext(copy);
+
+	auto fileWriter = boost::shared_ptr<Module>(new FileWriterModule(FileWriterModuleProps("./data/testOutput/frameA????.raw", true)));
+	copy->setNext(fileWriter);
+
+
+
+	PipeLine p("test");
+	p.appendModule(source);
+	BOOST_TEST(p.init());
+
+	Logger::setLogLevel(boost::log::trivial::severity_level::info);
+
+	p.run_all_threaded();
+
+	boost::this_thread::sleep_for(boost::chrono::seconds(1000));
+	Logger::setLogLevel(boost::log::trivial::severity_level::error);
+
+	p.stop();
+	p.term();
+
+	p.wait_for_all();
+}
+
 BOOST_AUTO_TEST_SUITE_END()
